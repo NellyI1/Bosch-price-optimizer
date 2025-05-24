@@ -4,17 +4,25 @@ A Flask-based web service that predicts optimal product prices using a machine l
 
 ## Live Demo
 
-> Deployed on [Render](https://render.com/) 
+> Deployed on [Render](https://render.com/), a cloud platform for hosting web applications.
 
 ## Features
 
-- REST API for price prediction
-- XGBoost model loaded via `joblib`
-- Hosted with Flask and Gunicorn
+- REST API endpoint for price prediction  
+- Uses a pre-trained XGBoost model loaded via `joblib`  
+- Flask web server with Gunicorn for production-ready hosting  
+- Easily extendable for new pricing models or datasets  
 
-## Requirements
+## Installation and Setup
 
-Install dependencies:
+### Prerequisites
+
+- Python 3.8 or higher  
+- pip package manager  
+
+### Clone the repository
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/NellyI1/Bosch-price-optimizer.git
+cd Bosch-price-optimizer
+
