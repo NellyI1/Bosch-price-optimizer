@@ -1,8 +1,12 @@
 services:
   - type: web
-    name: bosch-optimizer-api
+    name: bosch-price-optimizer
     env: python
-    buildCommand: "pip install -r requirements.txt"
-    startCommand: "python predict_app.py"
+    region: oregon
     plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "gunicorn predict_app:app --bind 0.0.0.0:$PORT"
     autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
