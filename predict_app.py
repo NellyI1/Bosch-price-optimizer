@@ -16,7 +16,6 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), "xgb_model.joblib")  # Safe
 # Path to cleaned dataset
 DATASET_PATH = os.path.join(os.path.dirname(__file__), "cleaned_amazon_15000.csv") 
 
-
 try:
     model = joblib.load(MODEL_PATH)  # Load trained ML model from file
     logging.info(f"Model loaded successfully from {MODEL_PATH}")  # Log success of model loading
@@ -34,6 +33,17 @@ except FileNotFoundError:
 def simulate_competitor_price(row):
     # Create competitor price randomly between 90% and 110% of input price
     return row["price"] * np.random.uniform(0.9, 1.1)
+
+def preprocess_input(df):
+    """
+    Preprocess input DataFrame to match model's expected features:
+    - Drop extra columns not used by model
+    - Fill missing columns with defaults if necessary
+    """
+    expected_features = ['stars', 'reviews', 'category', 'isBestSeller', 'boughtInLastMonth', 'Price_per_Review', 'High_Rating', 'Log_Price']
+    # Keep only expected columns (drop extras like uid, asin, title, price, competitor_price if present)
+    df_clean = df[expected_features].copy()
+    return df_clean
 
 @app.route("/")  # Define route for home page
 def home():
@@ -55,7 +65,10 @@ def predict():
             df["competitor_price"] = df.apply(simulate_competitor_price, axis=1)  # Simulate competitor price
             logging.info(f"Simulated competitor_price: {df['competitor_price'].values[0]}")  # Log simulated competitor price
 
-        prediction = model.predict(df)  # Predict demand using the loaded model
+        # Preprocess to match model input
+        df_processed = preprocess_input(df)
+
+        prediction = model.predict(df_processed)  # Predict demand using the loaded model
         logging.info(f"Prediction result: {prediction[0]}")  # Log prediction output
 
         # Simple price optimization: increase price by 5% if predicted demand > current demand; else decrease by 5%
@@ -83,7 +96,10 @@ def predict_batch():
         if "competitor_price" not in df.columns:  # If competitor price not present
             df["competitor_price"] = df.apply(simulate_competitor_price, axis=1)  # Simulate competitor price
 
-        predictions = model.predict(df)  # Predict demand for all rows
+        # Preprocess dataset to match model input features
+        df_processed = preprocess_input(df)
+
+        predictions = model.predict(df_processed)  # Predict demand for all rows
         df["predicted_demand"] = predictions  # Add predictions to DataFrame
 
         # Calculate optimized price for each row based on predicted demand
