@@ -30,9 +30,9 @@ except FileNotFoundError:
     dataset_df = None
     logging.warning("Cleaned dataset not found at provided path")  # Warn if file not found
 
-def simulate_competitor_price(row):
-    # Create competitor price randomly between 90% and 110% of input price
-    return row["price"] * np.random.uniform(0.9, 1.1)
+def simulate_competitor_rating(row):
+    # Create competitor rating randomly between 0.5 and 5.0
+    return round(np.random.uniform(0.5, 5.0), 1)
 
 def preprocess_input(df):
     """
@@ -41,14 +41,13 @@ def preprocess_input(df):
     - Fill missing columns with defaults if necessary
     """
     expected_features = ['stars', 'reviews', 'category', 'isBestSeller', 'boughtInLastMonth', 'Price_per_Review', 'High_Rating', 'Log_Price']
-    # Keep only expected columns (drop extras like uid, asin, title, price, competitor_price if present)
     df_clean = df[expected_features].copy()
     return df_clean
 
 @app.route("/")  # Define route for home page
 def home():
     logging.info("Home endpoint accessed")  # Log when home page is accessed
-    return "Flask API is running. Send POST to /predict with product features or GET /predict_batch to download batch predictions."  # Simple status message
+    return "Flask API is running. Send POST to /predict with product features, GET /predict_batch for CSV, or GET /suggest_products for recommendations."  # Simple status message
 
 @app.route("/predict", methods=["POST"])  # Define route to handle prediction requests
 def predict():
@@ -59,67 +58,77 @@ def predict():
         data = request.get_json()  # Parse JSON input from POST request
         logging.info(f"Received data for prediction: {data}")  # Log received input data
 
-        df = pd.DataFrame([data])  # Convert JSON data to pandas DataFrame (table)
+        df = pd.DataFrame([data])  # Convert JSON data to pandas DataFrame
 
-        if "competitor_price" not in df.columns:  # If competitor price not included
-            df["competitor_price"] = df.apply(simulate_competitor_price, axis=1)  # Simulate competitor price
-            logging.info(f"Simulated competitor_price: {df['competitor_price'].values[0]}")  # Log simulated competitor price
+        if "competitor_rating" not in df.columns:  # If competitor rating not included
+            df["competitor_rating"] = df.apply(simulate_competitor_rating, axis=1)  # Simulate competitor rating
+            logging.info(f"Simulated competitor_rating: {df['competitor_rating'].values[0]}")  # Log simulated rating
 
-        # Preprocess to match model input
-        df_processed = preprocess_input(df)
+        df_processed = preprocess_input(df)  # Preprocess to match model input
+        prediction = model.predict(df_processed)  # Predict demand using the model
+        logging.info(f"Prediction result: {prediction[0]}")  # Log prediction
 
-        prediction = model.predict(df_processed)  # Predict demand using the loaded model
-        logging.info(f"Prediction result: {prediction[0]}")  # Log prediction output
-
-        # Simple price optimization: increase price by 5% if predicted demand > current demand; else decrease by 5%
         optimized_price = df["price"].values[0] * 1.05 if prediction[0] > df["demand"].values[0] else df["price"].values[0] * 0.95
 
-        # Return JSON response with predicted demand, optimized price, and competitor price used
         return jsonify({
             "predicted_demand": float(prediction[0]),
             "optimized_price": round(optimized_price, 2),
-            "competitor_price_used": round(df["competitor_price"].values[0], 2)
+            "competitor_rating_used": df["competitor_rating"].values[0]
         })
     except Exception as e:
-        logging.error(f"Error during prediction: {e}")  # Log any errors during prediction
-        return jsonify({"error": str(e)}), 400  # Return error message if something goes wrong
+        logging.error(f"Error during prediction: {e}")  # Log any errors
+        return jsonify({"error": str(e)}), 400  # Return error response
 
-@app.route("/predict_batch", methods=["GET"])  # Define route to handle batch predictions using preloaded dataset
+@app.route("/predict_batch", methods=["GET"])  # Route for batch predictions
 def predict_batch():
     if model is None or dataset_df is None:
         logging.error("Batch prediction requested but model or dataset not loaded")  # Log if resources are missing
-        return jsonify({"error": "Model or dataset not loaded"}), 500  # Return error if missing
+        return jsonify({"error": "Model or dataset not loaded"}), 500
 
     try:
-        df = dataset_df.copy()  # Work on a copy to avoid altering original data
+        df = dataset_df.copy()
 
-        if "competitor_price" not in df.columns:  # If competitor price not present
-            df["competitor_price"] = df.apply(simulate_competitor_price, axis=1)  # Simulate competitor price
+        if "competitor_rating" not in df.columns:
+            df["competitor_rating"] = df.apply(simulate_competitor_rating, axis=1)  # Simulate competitor rating
 
-        # Preprocess dataset to match model input features
         df_processed = preprocess_input(df)
+        predictions = model.predict(df_processed)
+        df["predicted_demand"] = predictions
 
-        predictions = model.predict(df_processed)  # Predict demand for all rows
-        df["predicted_demand"] = predictions  # Add predictions to DataFrame
-
-        # Calculate optimized price for each row based on predicted demand
         df["optimized_price"] = df.apply(
             lambda row: row["price"] * 1.05 if row["predicted_demand"] > row["demand"] else row["price"] * 0.95,
             axis=1
         )
         df["optimized_price"] = df["optimized_price"].round(2)
-        df["competitor_price"] = df["competitor_price"].round(2)
+        df["competitor_rating"] = df["competitor_rating"].round(1)
 
-        output = BytesIO()  # Create in-memory output stream for CSV
-        df.to_csv(output, index=False)  # Write DataFrame to CSV in memory
-        output.seek(0)  # Reset stream position
+        output = BytesIO()
+        df.to_csv(output, index=False)
+        output.seek(0)
 
-        logging.info("Batch prediction completed and CSV prepared for download")  # Log completion
+        logging.info("Batch prediction completed and CSV prepared for download")
 
-        return send_file(output, mimetype='text/csv', download_name="batch_predictions.csv", as_attachment=True)  # Send CSV file
+        return send_file(output, mimetype='text/csv', download_name="batch_predictions.csv", as_attachment=True)
     except Exception as e:
-        logging.error(f"Error during batch prediction: {e}")  # Log errors
-        return jsonify({"error": str(e)}), 400  # Return error message if something goes wrong
+        logging.error(f"Error during batch prediction: {e}")
+        return jsonify({"error": str(e)}), 400
+
+@app.route("/suggest_products", methods=["GET"])  # New endpoint to suggest top 5 products
+def suggest_products():
+    if dataset_df is None:
+        logging.warning("Recommendation requested but dataset not loaded")
+        return jsonify({"error": "Dataset not loaded"}), 500
+
+    try:
+        top_products = dataset_df.sort_values(by=["stars", "reviews"], ascending=[False, False]).head(5)
+        suggestions = top_products[["title", "stars", "reviews", "price"]].to_dict(orient="records")
+
+        logging.info(f"Suggested top {len(suggestions)} products based on rating and reviews")
+
+        return jsonify({"suggested_products": suggestions})
+    except Exception as e:
+        logging.error(f"Error during product recommendation: {e}")
+        return jsonify({"error": str(e)}), 400
 
 if __name__ == "__main__":
-    app.run(debug=True)  # Run app in debug mode for development (auto-reloads if code changes)
+    app.run(debug=True)  # Run app in debug mode
